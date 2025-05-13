@@ -17,6 +17,7 @@ import sqlite3
 
 
 def fetch_and_clean(url: str) -> str:
+    # Синхронная загрузка и очистка текста с веб-страницы
     try:
         response = requests.get(url, timeout=20)
         response.raise_for_status()
@@ -25,11 +26,15 @@ def fetch_and_clean(url: str) -> str:
     except Exception as e:
         return ""
 
+
 def load_links_from_file(path: str) -> List[str]:
+    # Загрузка ссылок из текстового файла
     with open(path, 'r', encoding='windows-1251', errors='ignore') as f:
         return [line.strip() for line in f if line.strip()]
 
+
 async def fetch(client: httpx.AsyncClient, url: str) -> str:
+    # Асинхронная загрузка и извлечение основного текста со страницы
     try:
         response = await client.get(url, timeout=15)
         if response.status_code != 200:
@@ -37,11 +42,13 @@ async def fetch(client: httpx.AsyncClient, url: str) -> str:
             return ""
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        for selector in ['main', 'article', '[role=\"main\"]', '.content', '#content']:
+        # Попытка извлечь содержимое из семантических блоков
+        for selector in ['main', 'article', '[role="main"]', '.content', '#content']:
             content = soup.select_one(selector)
             if content:
                 return content.get_text(separator=' ', strip=True)
 
+        # Если ничего не найдено — возвращаем весь текст
         return soup.get_text(separator=' ', strip=True)
 
     except Exception as e:
@@ -49,11 +56,11 @@ async def fetch(client: httpx.AsyncClient, url: str) -> str:
         return ""
 
 
-
 async def generate_documents_from_urls_async(urls: list[str], max_concurrent: int = 30) -> dict[int, str]:
+    # Асинхронная генерация документов из списка URL
     documents = {}
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        sem = asyncio.Semaphore(max_concurrent)
+        sem = asyncio.Semaphore(max_concurrent)  # Ограничение параллелизма
 
         async def sem_fetch(idx, url):
             async with sem:
@@ -62,6 +69,7 @@ async def generate_documents_from_urls_async(urls: list[str], max_concurrent: in
 
         tasks = [sem_fetch(idx, url) for idx, url in enumerate(urls)]
 
+        # Асинхронная обработка с прогресс-баром
         for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc="Fetching URLs"):
             result = await coro
             if result:
@@ -76,23 +84,27 @@ if __name__ == "__main__":
     db_file = "crawler.sqlite"
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
-    # cursor.execute("SELECT name FROM links")
+    # Получаем список ссылок из БД
     cursor.execute("SELECT name FROM links ")
-
     links = [row[0] for row in cursor.fetchall()]
     conn.close()
+
+    # Загрузка текстов по URL (асинхронно)
     documents = asyncio.run(generate_documents_from_urls_async(links))
 
-
+    # Создание двух типов индексов
     classic = InvertedIndex()
     compressed = G_D_InvertedIndex()
-    # print(documents)
+
+    # Добавление документов в оба индекса
     for doc_id, text in documents.items():
         classic.add_document(doc_id, text)
         compressed.add_document(doc_id, text)
-        # print(classic.index)
         print()
+
+    # Сжатие второго индекса
     compressed.compress()
 
+    # Сохранение индексов в БД
     save_index_to_db(classic.index, db_file, "classic_index")
     save_index_to_db(compressed.index, db_file, "compressed_index")
