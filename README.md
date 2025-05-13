@@ -81,4 +81,12 @@ python run.py
 
 ---
 
+## 3. Тесты
+
+Запустите:
+
+```bash
+pytest tests/test_indexing.py
+```
+
    
