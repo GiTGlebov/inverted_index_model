@@ -1,6 +1,7 @@
 import sqlite3
 import pickle
 from typing import Dict, Set
+from gamma_delta_inverted_index import G_D_InvertedIndex
 
 def save_index_to_db(index: Dict[str, object], db_path: str, table_name: str):
     # Сохраняет обратный индекс в SQLite базу данных
@@ -30,6 +31,7 @@ def load_index_from_db(db_path: str, table_name: str) -> Dict[str, object]:
 def search_index_in_db(db_path: str, table_name: str, query: str) -> Set[int]:
     # Поиск по индексу в БД
     import re
+    decoder = G_D_InvertedIndex()
     terms = re.findall(r'\w+', query.lower())
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
@@ -42,15 +44,20 @@ def search_index_in_db(db_path: str, table_name: str, query: str) -> Set[int]:
             conn.close()
             return set()  # Если хотя бы одного терма нет — возвращаем пустое множество
         postings = pickle.loads(row[0])  # Десериализация
-        postings_list.append(set(postings) if isinstance(postings, list) else postings)
+        if isinstance(postings, str):
+            postings = decoder._decode_postings(postings)
+        postings_list.append(set(postings))
+
+        # postings_list.append(set(postings) if isinstance(postings, list) else postings)
 
     conn.close()
     return set.intersection(*postings_list)
 
 
-def benchmark_search(db_path: str, table_name: str, query: str, repeat: int = 10):
+def benchmark_search(db_path: str, table_name: str, query: str, repeat: int = 100):
     # Измерение среднего времени поиска запроса в БД
     import time
+    _ = search_index_in_db(db_path, table_name, query)
     total_time = 0
     for _ in range(repeat):
         start = time.time()
